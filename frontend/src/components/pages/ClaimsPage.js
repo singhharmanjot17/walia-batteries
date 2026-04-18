@@ -1,21 +1,30 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../DashboardLayout';
-import PageHeader from '../PageHeader';
 import { claimAPI } from '../../services/api';
-import { FileText, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { Plus, Search, Calendar } from 'lucide-react';
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function StatusPill({ status }) {
+  const map = {
+    pending:  { cls: 'warn', label: 'Pending' },
+    resolved: { cls: 'ok',   label: 'Resolved' },
+    rejected: { cls: 'bad',  label: 'Rejected' },
+  };
+  const m = map[status] || { cls: '', label: status };
+  return <span className={'pill ' + m.cls}><span className="dot" />{m.label}</span>;
+}
+
+const STOCK_LABELS = { new: 'New unit', foc: 'FOC', not_in_stock: 'Awaiting' };
+const STOCK_PILL_CLS = { new: 'info', foc: 'ok', not_in_stock: '' };
 
 const PAGE_SIZE = 10;
-
-const STATUS_STYLES = {
-  pending: 'bg-amber-100 text-amber-700',
-  resolved: 'bg-emerald-100 text-emerald-700',
-  rejected: 'bg-red-100 text-red-700',
-};
-
-const STOCK_LABELS = { new: 'New', foc: 'FOC', not_in_stock: 'Not in Stock' };
 
 export default function ClaimsPage() {
   const router = useRouter();
@@ -24,14 +33,13 @@ export default function ClaimsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [q, setQ] = useState('');
 
-  useEffect(() => { loadClaims(1, ''); }, []);
-
-  const loadClaims = async (p, status) => {
+  const loadClaims = useCallback(async (p, status) => {
     setLoading(true);
     try {
-      const res = await claimAPI.getAll(p, PAGE_SIZE, status || undefined);
+      const res = await claimAPI.getAll(p, PAGE_SIZE, status === 'all' ? undefined : status);
       if (res.data.success) {
         setClaims(res.data.data.claims || []);
         setTotalPages(res.data.data.total_pages || 1);
@@ -40,75 +48,95 @@ export default function ClaimsPage() {
       }
     } catch {}
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadClaims(1, 'all'); }, [loadClaims]);
 
   const handleStatusChange = (status) => {
     setStatusFilter(status);
     loadClaims(1, status);
   };
 
+  const displayed = q.trim()
+    ? claims.filter(item => {
+        const c = item.claim;
+        const s = q.toLowerCase();
+        return String(c.claim_number).includes(s)
+          || (item.customer_name || '').toLowerCase().includes(s)
+          || (item.new_model_name || '').toLowerCase().includes(s);
+      })
+    : claims;
+
   return (
     <DashboardLayout>
-      <PageHeader title="All Claims" icon={FileText} />
-      <div className="p-8">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-slate-800">All Claims</h2>
-              <div className="flex items-center gap-1">
-                {['', 'pending', 'resolved', 'rejected'].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => handleStatusChange(s)}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
-                      statusFilter === s
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button
-              onClick={() => router.push('/claims/create')}
-              className="flex items-center gap-1.5 bg-blue-600 text-white text-xs font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus size={13} /> New Claim
+      <div className="page fade-in">
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">Claims</h1>
+            <p className="page-sub">Every warranty filing, across all customers and brands.</p>
+          </div>
+          <div className="page-actions">
+            <button className="btn primary" onClick={() => router.push('/claims/create')}>
+              <Plus size={14} strokeWidth={1.75} />File a claim
             </button>
           </div>
+        </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
+        <div className="card">
+          <div className="card-head" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <div className="chips">
+              {['all', 'pending', 'resolved', 'rejected'].map(s => (
+                <button
+                  key={s}
+                  className={'chip' + (statusFilter === s ? ' active' : '')}
+                  onClick={() => handleStatusChange(s)}
+                >
+                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                  {s === 'all' && <span style={{ opacity: 0.55, marginLeft: 5 }}>{totalCount}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="topbar-search" style={{ width: 260, margin: '0 0 0 auto', position: 'relative' }}>
+              <Search size={14} className="ts-icon" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search claim #, customer…" style={{ paddingRight: 12 }} />
+            </div>
+          </div>
+
+          <div className="tbl-wrap">
+            <table>
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/60">
-                  {['Claim No.', 'Customer', 'Battery Serial', 'Stock', 'Status', 'Date'].map(h => (
-                    <th key={h} className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
-                  ))}
+                <tr>
+                  <th>Claim</th><th>Customer</th><th>Model</th>
+                  <th>CO #</th><th>Status</th><th>Stock</th>
+                  <th className="num">Filed</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
-                ) : claims.length === 0 ? (
-                  <tr><td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-400">No claims found</td></tr>
-                ) : claims.map(item => {
+                  <tr><td colSpan={7} className="empty">Loading…</td></tr>
+                ) : displayed.length === 0 ? (
+                  <tr><td colSpan={7} className="empty">No claims match.</td></tr>
+                ) : displayed.map(item => {
                   const c = item.claim;
-                  const statusCls = STATUS_STYLES[c.status] || 'bg-slate-100 text-slate-600';
+                  const cls = STOCK_PILL_CLS[c.stock_status] || '';
                   return (
-                    <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-3.5 text-sm font-mono font-semibold text-slate-800">C{String(c.claim_number).padStart(5, '0')}</td>
-                      <td className="px-6 py-3.5">
-                        <p className="text-sm font-medium text-slate-800">{item.customer_name}</p>
-                        <p className="text-xs text-slate-400">{item.customer_phone}</p>
+                    <tr key={c.id}>
+                      <td>
+                        <span className="ff-mono" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                          C{String(c.claim_number).padStart(5, '0')}
+                        </span>
                       </td>
-                      <td className="px-6 py-3.5 text-sm font-mono text-slate-500">{item.battery_serial || '—'}</td>
-                      <td className="px-6 py-3.5 text-sm text-slate-600">{STOCK_LABELS[c.stock_status] || c.stock_status}</td>
-                      <td className="px-6 py-3.5">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusCls}`}>{c.status}</span>
+                      <td className="strong">{item.customer_name}</td>
+                      <td style={{ color: 'var(--muted)' }}>{item.new_model_name || item.battery_serial || '—'}</td>
+                      <td><span className="ff-mono" style={{ color: 'var(--muted)' }}>{c.co_number || '—'}</span></td>
+                      <td><StatusPill status={c.status} /></td>
+                      <td>
+                        <span className={'pill ' + cls}>
+                          <span className="dot" />
+                          {STOCK_LABELS[c.stock_status] || c.stock_status}
+                        </span>
                       </td>
-                      <td className="px-6 py-3.5 text-sm text-slate-500">{new Date(c.created_at).toLocaleDateString()}</td>
+                      <td className="num">{fmtDate(c.created_at)}</td>
                     </tr>
                   );
                 })}
@@ -117,15 +145,15 @@ export default function ClaimsPage() {
           </div>
 
           {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-              <p className="text-xs text-slate-500">{totalCount} claims total</p>
-              <div className="flex items-center gap-1">
-                <button onClick={() => loadClaims(page - 1, statusFilter)} disabled={page === 1} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"><ChevronLeft size={14} /></button>
-                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (
-                  <button key={p} onClick={() => loadClaims(p, statusFilter)} className={`w-7 h-7 text-xs rounded-lg font-medium ${p === page ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{p}</button>
+            <div className="pagination">
+              <div>Page <strong>{page}</strong> of {totalPages} · {totalCount} total</div>
+              <div className="pg-btns">
+                <button className="btn sm" onClick={() => loadClaims(page - 1, statusFilter)} disabled={page === 1}>Prev</button>
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map(p => (
+                  <button key={p} className={'btn sm' + (p === page ? ' primary' : '')} onClick={() => loadClaims(p, statusFilter)}>{p}</button>
                 ))}
-                {totalPages > 7 && <span className="text-slate-400 text-xs px-1">…</span>}
-                <button onClick={() => loadClaims(page + 1, statusFilter)} disabled={page === totalPages} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"><ChevronRight size={14} /></button>
+                {totalPages > 5 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>…</span>}
+                <button className="btn sm" onClick={() => loadClaims(page + 1, statusFilter)} disabled={page === totalPages}>Next</button>
               </div>
             </div>
           )}

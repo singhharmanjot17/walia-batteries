@@ -1,96 +1,78 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import DashboardLayout from '../DashboardLayout';
-import PageHeader from '../PageHeader';
 import { claimAPI, customerAPI, batteryAPI, modelAPI } from '../../services/api';
-import { FilePlus } from 'lucide-react';
+import { Search, Battery, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 
-const STOCK_STYLES = { new: 'bg-emerald-100 text-emerald-700', foc: 'bg-blue-100 text-blue-700', not_in_stock: 'bg-slate-100 text-slate-600' };
-const STATUS_STYLES = { pending: 'bg-amber-100 text-amber-700', resolved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-red-100 text-red-700' };
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 export default function CreateClaimPage() {
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [customerBatteries, setCustomerBatteries] = useState([]);
-  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
-  const [customerSearchError, setCustomerSearchError] = useState('');
+  const router = useRouter();
 
+  /* Step state */
+  const [step, setStep] = useState(1);
+
+  /* Step 1 — find customer */
+  const [phone, setPhone] = useState('');
+  const [customer, setCustomer] = useState(null);
+  const [searchErr, setSearchErr] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  /* Step 2 — pick battery */
+  const [batteries, setBatteries] = useState([]);
+  const [batteryId, setBatteryId] = useState(null);
+
+  /* Step 3 — details */
   const [models, setModels] = useState([]);
-  const [recentClaims, setRecentClaims] = useState([]);
-  const [claimsLoading, setClaimsLoading] = useState(false);
-
   const [form, setForm] = useState({
-    faulty_battery_id: '',
-    co_number: '',
-    actual_dos: '',
-    stock_status: 'new',
-    new_battery_model_id: '',
-    new_battery_serial_number: '',
-    remarks: '',
+    actual_dos: '', co_number: '', stock_status: 'not_in_stock',
+    new_battery_model_id: '', new_battery_serial_number: '', remarks: '',
   });
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
+  const [formErr, setFormErr] = useState('');
+
+  /* Success */
+  const [submitted, setSubmitted] = useState(null); // claim number
 
   useEffect(() => {
-    loadModels();
-    loadRecentClaims();
+    modelAPI.getAll(null, 1).then(r => { if (r.data.success) setModels(r.data.data || []); }).catch(() => {});
   }, []);
 
-  const loadModels = async () => {
-    try {
-      const res = await modelAPI.getAll(null, 1);
-      if (res.data.success) setModels(res.data.data || []);
-    } catch {}
-  };
-
-  const loadRecentClaims = async () => {
-    setClaimsLoading(true);
-    try {
-      const res = await claimAPI.getAll(1, 5);
-      if (res.data.success) setRecentClaims(res.data.data.claims || []);
-    } catch {}
-    finally { setClaimsLoading(false); }
-  };
-
-  const handleCustomerSearch = async (e) => {
+  /* Step 1 submit */
+  const doSearch = async (e) => {
     e.preventDefault();
-    if (!customerPhone.trim()) return;
-    setCustomerSearchError('');
-    setSelectedCustomer(null);
-    setCustomerBatteries([]);
-    setCustomerSearchLoading(true);
+    setSearchErr(''); setCustomer(null);
+    setSearchLoading(true);
     try {
-      const res = await customerAPI.searchByPhone(customerPhone.trim());
-      if (res.data.success) {
-        const cust = res.data.data;
-        setSelectedCustomer(cust);
-        const batRes = await batteryAPI.getByCustomer(cust.id);
-        if (batRes.data.success) {
-          setCustomerBatteries((batRes.data.data || []).map(item => ({
-            ...item.battery,
-            brand_name: item.brand?.name,
-            model_name: item.model?.model_name,
-          })));
-        }
-      } else {
-        setCustomerSearchError('Customer not found');
+      const res = await customerAPI.searchByPhone(phone.trim());
+      if (!res.data.success) { setSearchErr('No customer found for that phone number.'); return; }
+      const cust = res.data.data;
+      setCustomer(cust);
+      // load their batteries
+      const bRes = await batteryAPI.getByCustomer(cust.id);
+      if (bRes.data.success) {
+        setBatteries((bRes.data.data || []).map(i => ({
+          ...i.battery, brand_name: i.brand?.name, model_name: i.model?.model_name,
+        })));
       }
-    } catch { setCustomerSearchError('Customer not found'); }
-    finally { setCustomerSearchLoading(false); }
+      setStep(2);
+    } catch { setSearchErr('No customer found for that phone number.'); }
+    finally { setSearchLoading(false); }
   };
 
-  const handleSubmit = async (e) => {
+  /* Step 3 submit */
+  const doSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedCustomer) { setFormError('Find a customer first'); return; }
-    setFormError('');
-    setFormSuccess('');
-    setSaving(true);
+    setFormErr(''); setSaving(true);
     try {
       const res = await claimAPI.create({
-        customer_id: selectedCustomer.id,
-        faulty_battery_id: parseInt(form.faulty_battery_id),
+        customer_id: customer.id,
+        faulty_battery_id: batteryId,
         co_number: form.co_number || null,
         actual_dos: form.actual_dos || null,
         stock_status: form.stock_status,
@@ -99,160 +81,202 @@ export default function CreateClaimPage() {
         remarks: form.remarks || null,
       });
       if (res.data.success) {
-        setFormSuccess(`Claim #${res.data.data.claim_number} filed successfully`);
-        setForm({ faulty_battery_id: '', co_number: '', actual_dos: '', stock_status: 'new', new_battery_model_id: '', new_battery_serial_number: '', remarks: '' });
-        setSelectedCustomer(null);
-        setCustomerPhone('');
-        setCustomerBatteries([]);
-        loadRecentClaims();
+        setSubmitted(res.data.data.claim_number);
       } else {
-        setFormError(res.data.message || 'Failed to create claim');
+        setFormErr(res.data.message || 'Failed to file claim');
       }
     } catch (err) {
-      setFormError(err.response?.data?.message || 'Failed to create claim');
+      setFormErr(err.response?.data?.message || 'Failed to file claim');
     } finally { setSaving(false); }
   };
 
+  /* ── Success screen ── */
+  if (submitted !== null) {
+    return (
+      <DashboardLayout>
+        <div className="page fade-in" style={{ maxWidth: 640 }}>
+          <div className="card card-pad" style={{ textAlign: 'center', padding: '56px 40px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--ok-soft)', color: 'var(--ok)', display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
+              <Check size={28} strokeWidth={2} />
+            </div>
+            <div className="page-title" style={{ fontSize: 28 }}>Claim filed</div>
+            <p className="page-sub" style={{ margin: '10px auto 24px' }}>
+              Claim <span className="ff-mono" style={{ color: 'var(--ink)' }}>C{String(submitted).padStart(5, '0')}</span>{' '}
+              has been logged for <strong>{customer?.name}</strong>.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button className="btn" onClick={() => { setSubmitted(null); setStep(1); setCustomer(null); setPhone(''); setBatteryId(null); setBatteries([]); setForm({ actual_dos: '', co_number: '', stock_status: 'not_in_stock', new_battery_model_id: '', new_battery_serial_number: '', remarks: '' }); }}>
+                File another
+              </button>
+              <button className="btn primary" onClick={() => router.push('/claims')}>
+                View claims
+              </button>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const selectedBattery = batteries.find(b => b.id === batteryId);
+
   return (
     <DashboardLayout>
-      <PageHeader title="Create Claim" icon={FilePlus} />
-      <div className="p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Form */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <h2 className="text-base font-semibold text-slate-800 mb-1">New Warranty Claim</h2>
-            <p className="text-xs text-slate-500 mb-5">File a claim for a faulty battery.</p>
+      <div className="page fade-in" style={{ maxWidth: 860 }}>
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">File a claim</h1>
+            <p className="page-sub">Find the customer, pick the faulty unit, log the details.</p>
+          </div>
+        </div>
 
-            {/* Customer search */}
-            <div className="mb-5 p-3 bg-slate-50 rounded-lg">
-              <label className="block text-xs font-medium text-slate-700 mb-2">Find Customer</label>
-              <form onSubmit={handleCustomerSearch} className="flex gap-2">
-                <input
-                  value={customerPhone}
-                  onChange={e => setCustomerPhone(e.target.value)}
-                  placeholder="Phone number"
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button type="submit" disabled={customerSearchLoading} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-60">
-                  {customerSearchLoading ? '...' : 'Find'}
+        {/* Step indicator */}
+        <div className="stepline">
+          <div className={'step' + (step === 1 ? ' active' : step > 1 ? ' done' : '')}>
+            <div className="step-num">{step > 1 ? '✓' : '1'}</div>
+            <span>Find customer</span>
+          </div>
+          <div className="step-sep" />
+          <div className={'step' + (step === 2 ? ' active' : step > 2 ? ' done' : '')}>
+            <div className="step-num">{step > 2 ? '✓' : '2'}</div>
+            <span>Faulty unit</span>
+          </div>
+          <div className="step-sep" />
+          <div className={'step' + (step === 3 ? ' active' : '')}>
+            <div className="step-num">3</div>
+            <span>Details</span>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          {/* ── Step 1 ── */}
+          {step === 1 && (
+            <>
+              <div className="card-title" style={{ marginBottom: 4 }}>Locate the customer</div>
+              <div className="card-sub" style={{ marginBottom: 18 }}>Search by their registered phone number.</div>
+              <form onSubmit={doSearch} style={{ display: 'flex', gap: 8 }}>
+                <input className="input" style={{ flex: 1 }} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone number" required />
+                <button type="submit" className="btn primary" disabled={searchLoading}>
+                  <Search size={14} strokeWidth={1.75} />{searchLoading ? 'Searching…' : 'Find'}
                 </button>
               </form>
-              {customerSearchError && <p className="mt-1.5 text-xs text-red-600">{customerSearchError}</p>}
-              {selectedCustomer && (
-                <div className="mt-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-                  <p className="text-xs font-semibold text-emerald-800">{selectedCustomer.name}</p>
-                  <p className="text-xs text-emerald-600">{selectedCustomer.phone} · {customerBatteries.length} batteries</p>
+              {searchErr && (
+                <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--bad-soft)', color: 'var(--bad)', borderRadius: 8, fontSize: 13 }}>
+                  {searchErr}
                 </div>
               )}
-            </div>
+            </>
+          )}
 
-            {formError && <div className="mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{formError}</div>}
-            {formSuccess && <div className="mb-3 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700 font-medium">{formSuccess}</div>}
-
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Faulty Battery</label>
-                <select
-                  value={form.faulty_battery_id}
-                  onChange={e => setForm(p => ({ ...p, faulty_battery_id: e.target.value }))}
-                  required
-                  disabled={customerBatteries.length === 0}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-                >
-                  <option value="">{selectedCustomer ? (customerBatteries.length === 0 ? 'No batteries on record' : 'Select battery') : 'Find customer first'}</option>
-                  {customerBatteries.map(b => (
-                    <option key={b.id} value={b.id}>{b.brand_name} {b.model_name} — {b.serial_number}</option>
+          {/* ── Step 2 ── */}
+          {step === 2 && customer && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                <div>
+                  <div className="card-title">Select the faulty battery</div>
+                  <div className="card-sub" style={{ marginTop: 3 }}>
+                    {customer.name} · {customer.phone} · {batteries.length} battery{batteries.length !== 1 ? 'ies' : 'y'} on file
+                  </div>
+                </div>
+                <button className="btn sm ghost" onClick={() => { setStep(1); setCustomer(null); setBatteries([]); }}>
+                  <ChevronLeft size={12} />Change
+                </button>
+              </div>
+              {batteries.length === 0 ? (
+                <div className="empty">This customer has no batteries on file.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {batteries.map(b => (
+                    <button
+                      key={b.id}
+                      onClick={() => { setBatteryId(b.id); setStep(3); }}
+                      style={{ border: '1px solid var(--hair)', borderRadius: 10, padding: '14px 16px', background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', width: '100%', cursor: 'pointer', transition: 'border-color 120ms, background 120ms' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--hair)'; e.currentTarget.style.background = 'var(--surface)'; }}
+                    >
+                      <div style={{ width: 36, height: 36, background: 'var(--surface-2)', borderRadius: 8, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                        <Battery size={18} strokeWidth={1.75} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 500 }}>{b.brand_name} · {b.model_name}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                          <span className="ff-mono">{b.serial_number}</span> · Sold {fmtDate(b.date_of_sale)}
+                        </div>
+                      </div>
+                      <ChevronRight size={16} strokeWidth={1.75} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+                    </button>
                   ))}
-                </select>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Step 3 ── */}
+          {step === 3 && customer && selectedBattery && (
+            <form onSubmit={doSubmit}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+                <div>
+                  <div className="card-title">Claim details</div>
+                  <div className="card-sub" style={{ marginTop: 3 }}>
+                    {customer.name} · <span className="ff-mono">{selectedBattery.serial_number}</span>
+                  </div>
+                </div>
+                <button type="button" className="btn sm ghost" onClick={() => setStep(2)}>
+                  <ChevronLeft size={12} />Back
+                </button>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">CO Number (optional)</label>
-                <input value={form.co_number} onChange={e => setForm(p => ({ ...p, co_number: e.target.value }))} placeholder="CO number" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div className="field">
+                  <label>Actual date of sale</label>
+                  <input type="date" className="input" value={form.actual_dos} onChange={e => setForm(p => ({ ...p, actual_dos: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>CO number <span style={{ color: 'var(--muted-2)', fontWeight: 400 }}>(optional)</span></label>
+                  <input className="input" value={form.co_number} onChange={e => setForm(p => ({ ...p, co_number: e.target.value }))} placeholder="CO-4413" />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Actual Date of Sale (optional)</label>
-                <input type="date" value={form.actual_dos} onChange={e => setForm(p => ({ ...p, actual_dos: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Stock Status</label>
-                <select value={form.stock_status} onChange={e => setForm(p => ({ ...p, stock_status: e.target.value }))} required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="new">New</option>
-                  <option value="foc">FOC</option>
-                  <option value="not_in_stock">Not in Stock</option>
+              <div className="field" style={{ marginBottom: 14 }}>
+                <label>Replacement stock status</label>
+                <select className="ds-select input" value={form.stock_status} onChange={e => setForm(p => ({ ...p, stock_status: e.target.value }))}>
+                  <option value="not_in_stock">Awaiting stock</option>
+                  <option value="new">New unit provided</option>
+                  <option value="foc">Free of cost (FOC)</option>
                 </select>
               </div>
 
               {form.stock_status !== 'not_in_stock' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">New Battery Model (optional)</label>
-                    <select value={form.new_battery_model_id} onChange={e => setForm(p => ({ ...p, new_battery_model_id: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select model</option>
-                      {models.map(m => <option key={m.id} value={m.id}>{m.model_name}{m.warranty_months ? ` (${m.warranty_months}mo)` : ''}</option>)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, padding: 14, background: 'var(--surface-2)', borderRadius: 10, marginBottom: 14 }}>
+                  <div className="field">
+                    <label>Replacement model</label>
+                    <select className="ds-select input" value={form.new_battery_model_id} onChange={e => setForm(p => ({ ...p, new_battery_model_id: e.target.value }))}>
+                      <option value="">Select…</option>
+                      {models.map(m => <option key={m.id} value={m.id}>{m.model_name}{m.warranty_months ? ` (${m.warranty_months} mo)` : ''}</option>)}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">New Battery Serial # (optional)</label>
-                    <input value={form.new_battery_serial_number} onChange={e => setForm(p => ({ ...p, new_battery_serial_number: e.target.value }))} placeholder="New serial number" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="field">
+                    <label>Replacement serial</label>
+                    <input className="input" value={form.new_battery_serial_number} onChange={e => setForm(p => ({ ...p, new_battery_serial_number: e.target.value }))} placeholder="Serial #" />
                   </div>
-                </>
+                </div>
               )}
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Remarks (optional)</label>
-                <textarea value={form.remarks} onChange={e => setForm(p => ({ ...p, remarks: e.target.value }))} rows={2} placeholder="Additional remarks..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <div className="field" style={{ marginBottom: 22 }}>
+                <label>Remarks</label>
+                <textarea className="input ds-textarea" rows={3} value={form.remarks} onChange={e => setForm(p => ({ ...p, remarks: e.target.value }))} placeholder="Condition of the unit, reason for claim…" style={{ resize: 'vertical', minHeight: 80 }} />
               </div>
 
-              <button type="submit" disabled={saving} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors">
-                {saving ? 'Filing Claim...' : 'File Claim'}
-              </button>
-            </form>
-          </div>
+              {formErr && (
+                <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bad-soft)', color: 'var(--bad)', borderRadius: 8, fontSize: 13 }}>{formErr}</div>
+              )}
 
-          {/* Recent claims */}
-          <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Recent Claims</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/60">
-                    {['Claim No.', 'Customer', 'Model', 'Status', 'Date'].map(h => (
-                      <th key={h} className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {claimsLoading ? (
-                    <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
-                  ) : recentClaims.length === 0 ? (
-                    <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">No claims yet</td></tr>
-                  ) : recentClaims.map(item => {
-                    const c = item.claim;
-                    const statusCls = STATUS_STYLES[c.status] || 'bg-slate-100 text-slate-600';
-                    return (
-                      <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-3.5 text-sm font-mono font-semibold text-slate-800">C{String(c.claim_number).padStart(5, '0')}</td>
-                        <td className="px-6 py-3.5">
-                          <p className="text-sm font-medium text-slate-800">{item.customer_name}</p>
-                          <p className="text-xs text-slate-400">{item.customer_phone}</p>
-                        </td>
-                        <td className="px-6 py-3.5 text-sm text-slate-600">{item.new_model_name || item.battery_serial || '—'}</td>
-                        <td className="px-6 py-3.5">
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusCls}`}>{c.status}</span>
-                        </td>
-                        <td className="px-6 py-3.5 text-sm text-slate-500">{new Date(c.created_at).toLocaleDateString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 14, borderTop: '1px solid var(--hair)' }}>
+                <button type="button" className="btn" onClick={() => router.push('/claims')}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Filing…' : 'Submit claim'}</button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </DashboardLayout>

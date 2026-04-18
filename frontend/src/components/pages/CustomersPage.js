@@ -1,11 +1,198 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import DashboardLayout from '../DashboardLayout';
-import PageHeader from '../PageHeader';
-import { customerAPI } from '../../services/api';
-import { Users, Search, Plus, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { customerAPI, batteryAPI, claimAPI } from '../../services/api';
+import { Search, Plus, Download, Eye, X } from 'lucide-react';
 
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function initials(name = '') {
+  return name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+}
+
+function StatusPill({ status }) {
+  const map = { pending: { cls: 'warn', label: 'Pending' }, resolved: { cls: 'ok', label: 'Resolved' }, rejected: { cls: 'bad', label: 'Rejected' } };
+  const m = map[status] || { cls: '', label: status };
+  return <span className={'pill ' + m.cls}><span className="dot" />{m.label}</span>;
+}
+
+/* ── Customer detail drawer ─────────────────────────────────────── */
+function CustomerDrawer({ customerId, onClose }) {
+  const [customer, setCustomer] = useState(null);
+  const [batteries, setBatteries] = useState([]);
+  const [claims, setClaims] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!customerId) return;
+    setLoading(true);
+    Promise.allSettled([
+      customerAPI.getById(customerId),
+      batteryAPI.getByCustomer(customerId),
+      claimAPI.getByCustomer(customerId),
+    ]).then(([cRes, bRes, clRes]) => {
+      if (cRes.status === 'fulfilled' && cRes.value.data.success)
+        setCustomer(cRes.value.data.data);
+      if (bRes.status === 'fulfilled' && bRes.value.data.success)
+        setBatteries((bRes.value.data.data || []).map(i => ({
+          ...i.battery, brand_name: i.brand?.name, model_name: i.model?.model_name,
+        })));
+      if (clRes.status === 'fulfilled' && clRes.value.data.success)
+        setClaims(clRes.value.data.data || []);
+    }).finally(() => setLoading(false));
+  }, [customerId]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const open = !!customerId;
+
+  return (
+    <>
+      <div className={'drawer-scrim' + (open ? ' open' : '')} onClick={onClose} />
+      <div className={'drawer' + (open ? ' open' : '')} role="dialog" aria-hidden={!open}>
+        <div className="drawer-head">
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Detail view</div>
+            <div className="drawer-title">{customer?.name || 'Customer'}</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={16} strokeWidth={1.75} /></button>
+        </div>
+        <div className="drawer-body">
+          {loading ? (
+            <div className="empty">Loading…</div>
+          ) : !customer ? (
+            <div className="empty">Not found.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+              {/* Avatar + name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div className="avatar" style={{ width: 52, height: 52, fontSize: 18 }}>{initials(customer.name)}</div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 500 }}>{customer.name}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Customer ID #{customer.id}</div>
+                </div>
+              </div>
+              {/* Contact cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ padding: '12px 14px', border: '1px solid var(--hair)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 500 }}>Phone</div>
+                  <div className="ff-mono" style={{ fontSize: 13 }}>{customer.phone}</div>
+                </div>
+                <div style={{ padding: '12px 14px', border: '1px solid var(--hair)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 500 }}>Email</div>
+                  <div style={{ fontSize: 13 }}>{customer.email || '—'}</div>
+                </div>
+              </div>
+              {customer.address && (
+                <div style={{ padding: '12px 14px', border: '1px solid var(--hair)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 500 }}>Address</div>
+                  <div style={{ fontSize: 13 }}>{customer.address}</div>
+                </div>
+              )}
+              {/* Batteries */}
+              <div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontWeight: 600 }}>
+                  Batteries ({batteries.length})
+                </div>
+                {batteries.length === 0 ? <div className="empty" style={{ padding: 24 }}>None on file.</div> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {batteries.map(b => (
+                      <div key={b.id} style={{ border: '1px solid var(--hair)', borderRadius: 10, padding: '12px 14px' }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{b.brand_name} · {b.model_name}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                          <span className="ff-mono">{b.serial_number}</span> · Sold {fmtDate(b.date_of_sale)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Claims */}
+              <div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontWeight: 600 }}>
+                  Claims ({claims.length})
+                </div>
+                {claims.length === 0 ? <div className="empty" style={{ padding: 24 }}>No claims filed.</div> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {claims.map(item => {
+                      const c = item.claim || item;
+                      return (
+                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--hair)' }}>
+                          <span className="ff-mono" style={{ color: 'var(--ink)', fontWeight: 500 }}>C{String(c.claim_number).padStart(5, '0')}</span>
+                          <div style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1 }}>{item.new_model_name || item.battery_serial || '—'}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDate(c.created_at)}</div>
+                          <StatusPill status={c.status} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Add customer modal ─────────────────────────────────────────── */
+function AddCustomerModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      const res = await customerAPI.create(form);
+      if (res.data.success) { onCreated(); onClose(); }
+      else setError(res.data.message || 'Failed to create customer');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to create customer');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      <div className="drawer-scrim open" onClick={onClose} />
+      <div className="drawer open" role="dialog">
+        <div className="drawer-head">
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>New record</div>
+            <div className="drawer-title">Add customer</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={16} strokeWidth={1.75} /></button>
+        </div>
+        <div className="drawer-body">
+          {error && <div style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--bad-soft)', color: 'var(--bad)', borderRadius: 8, fontSize: 13 }}>{error}</div>}
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="field"><label>Name</label><input className="input" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required placeholder="Customer name" /></div>
+            <div className="field"><label>Phone</label><input className="input" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} required placeholder="Phone number" /></div>
+            <div className="field"><label>Email <span style={{ color: 'var(--muted-2)', fontWeight: 400 }}>(optional)</span></label><input type="email" className="input" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@example.com" /></div>
+            <div className="field"><label>Address <span style={{ color: 'var(--muted-2)', fontWeight: 400 }}>(optional)</span></label><textarea className="ds-textarea input" rows={3} value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="Address" style={{ resize: 'vertical', minHeight: 80 }} /></div>
+            <div style={{ display: 'flex', gap: 8, paddingTop: 8, borderTop: '1px solid var(--hair)', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save customer'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Main page ──────────────────────────────────────────────────── */
 const PAGE_SIZE = 10;
 
 export default function CustomersPage() {
@@ -14,21 +201,14 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [searchPhone, setSearchPhone] = useState('');
+  const [q, setQ] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [drawerCustomerId, setDrawerCustomerId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
 
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
-
-  useEffect(() => { loadCustomers(1); }, []);
-
-  const loadCustomers = async (p) => {
+  const loadCustomers = useCallback(async (p) => {
     setLoading(true);
     setIsSearching(false);
-    setSearchPhone('');
     try {
       const res = await customerAPI.getAll(p, PAGE_SIZE);
       if (res.data.success) {
@@ -39,15 +219,17 @@ export default function CustomersPage() {
       }
     } catch {}
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadCustomers(1); }, [loadCustomers]);
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchPhone.trim()) { loadCustomers(1); return; }
+    if (!q.trim()) { loadCustomers(1); return; }
     setLoading(true);
     setIsSearching(true);
     try {
-      const res = await customerAPI.searchByPhone(searchPhone.trim());
+      const res = await customerAPI.searchByPhone(q.trim());
       setCustomers(res.data.success ? [res.data.data] : []);
       setTotalPages(1);
       setTotalCount(res.data.success ? 1 : 0);
@@ -55,78 +237,71 @@ export default function CustomersPage() {
     finally { setLoading(false); }
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    setFormSuccess('');
-    setSaving(true);
-    try {
-      const res = await customerAPI.create(form);
-      if (res.data.success) {
-        setFormSuccess('Customer created!');
-        setForm({ name: '', phone: '', email: '', address: '' });
-        loadCustomers(1);
-        setTimeout(() => { setShowModal(false); setFormSuccess(''); }, 1200);
-      } else {
-        setFormError(res.data.message || 'Failed to create customer');
-      }
-    } catch (err) {
-      setFormError(err.response?.data?.message || 'Failed to create customer');
-    } finally { setSaving(false); }
-  };
-
   return (
     <DashboardLayout>
-      <PageHeader title="Customers" icon={Users} />
-      <div className="p-8">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-          <div className="px-6 py-4 border-b border-slate-100">
-            <h2 className="text-base font-semibold text-slate-800 mb-3">Customers</h2>
-            <div className="flex items-center gap-3">
-              <form onSubmit={handleSearch} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex-1 max-w-sm">
-                <Search size={13} className="text-slate-400 flex-shrink-0" />
-                <input
-                  value={searchPhone}
-                  onChange={e => setSearchPhone(e.target.value)}
-                  className="flex-1 bg-transparent text-xs outline-none text-slate-700 placeholder-slate-400"
-                  placeholder="Search by phone number"
-                />
-                <button type="submit" className="text-xs text-blue-600 font-semibold hover:text-blue-700">Search</button>
-              </form>
-              {isSearching && (
-                <button onClick={() => { setSearchPhone(''); loadCustomers(1); }} className="text-xs text-slate-500 hover:text-slate-700">Clear</button>
-              )}
-              <button
-                onClick={() => { setShowModal(true); setFormError(''); setFormSuccess(''); }}
-                className="ml-auto flex items-center gap-1.5 bg-blue-600 text-white text-xs font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus size={13} /> Add Customer
+      <div className="page fade-in">
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">Customers</h1>
+            <p className="page-sub">{totalCount} records · Directory of every customer on file.</p>
+          </div>
+          <div className="page-actions">
+            <button className="btn primary" onClick={() => setShowAdd(true)}>
+              <Plus size={14} strokeWidth={1.75} />New customer
+            </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head" style={{ gap: 12 }}>
+            <form onSubmit={handleSearch} className="topbar-search" style={{ width: 300, margin: 0, position: 'relative' }}>
+              <Search size={14} className="ts-icon" />
+              <input
+                value={q}
+                onChange={e => { setQ(e.target.value); if (!e.target.value) loadCustomers(1); }}
+                placeholder="Search name, phone…"
+                style={{ paddingRight: 12 }}
+              />
+            </form>
+            {isSearching && (
+              <button className="btn sm ghost" onClick={() => { setQ(''); loadCustomers(1); }}>
+                <X size={12} /> Clear
               </button>
-            </div>
+            )}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="tbl-wrap">
+            <table>
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/60">
-                  {['Name', 'Phone', 'Email', 'Address', 'Action'].map(h => (
-                    <th key={h} className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
-                  ))}
+                <tr>
+                  <th>Customer</th><th>Phone</th><th>Email</th><th>Address</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
+                  <tr><td colSpan={5} className="empty">Loading…</td></tr>
                 ) : customers.length === 0 ? (
-                  <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">No customers found</td></tr>
+                  <tr><td colSpan={5} className="empty">No customers found.</td></tr>
                 ) : customers.map(c => (
-                  <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-3.5 text-sm font-medium text-slate-800">{c.name}</td>
-                    <td className="px-6 py-3.5 text-sm text-slate-600">{c.phone}</td>
-                    <td className="px-6 py-3.5 text-sm text-slate-500">{c.email || '—'}</td>
-                    <td className="px-6 py-3.5 text-sm text-slate-500 max-w-[200px] truncate">{c.address || '—'}</td>
-                    <td className="px-6 py-3.5">
-                      <button className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-medium">View</button>
+                  <tr key={c.id} onClick={() => setDrawerCustomerId(c.id)} style={{ cursor: 'pointer' }}>
+                    <td className="strong">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div className="avatar" style={{ width: 26, height: 26, fontSize: 10.5 }}>{initials(c.name)}</div>
+                        <div>
+                          <div>{c.name}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 400 }}>ID #{c.id}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span className="ff-mono">{c.phone}</span></td>
+                    <td style={{ color: 'var(--muted)' }}>{c.email || '—'}</td>
+                    <td style={{ color: 'var(--muted)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.address || '—'}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="View details" onClick={e => { e.stopPropagation(); setDrawerCustomerId(c.id); }}>
+                          <Eye size={14} strokeWidth={1.75} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -135,59 +310,31 @@ export default function CustomersPage() {
           </div>
 
           {!isSearching && totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-              <p className="text-xs text-slate-500">{totalCount} total</p>
-              <div className="flex items-center gap-1">
-                <button onClick={() => loadCustomers(page - 1)} disabled={page === 1} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <ChevronLeft size={14} />
-                </button>
-                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (
-                  <button key={p} onClick={() => loadCustomers(p)} className={`w-7 h-7 text-xs rounded-lg font-medium ${p === page ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{p}</button>
+            <div className="pagination">
+              <div>Page <strong>{page}</strong> of {totalPages} · {totalCount} total</div>
+              <div className="pg-btns">
+                <button className="btn sm" onClick={() => loadCustomers(page - 1)} disabled={page === 1}>Prev</button>
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map(p => (
+                  <button key={p} className={'btn sm' + (p === page ? ' primary' : '')} onClick={() => loadCustomers(p)}>{p}</button>
                 ))}
-                {totalPages > 7 && <span className="text-slate-400 text-xs px-1">…</span>}
-                <button onClick={() => loadCustomers(page + 1)} disabled={page === totalPages} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <ChevronRight size={14} />
-                </button>
+                {totalPages > 5 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>…</span>}
+                <button className="btn sm" onClick={() => loadCustomers(page + 1)} disabled={page === totalPages}>Next</button>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-slate-800">Add New Customer</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-            </div>
-            {formError && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{formError}</div>}
-            {formSuccess && <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">{formSuccess}</div>}
-            <form onSubmit={handleSave} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Name</label>
-                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required placeholder="Customer name" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Phone</label>
-                <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} required placeholder="Phone number" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Email (optional)</label>
-                <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@example.com" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Address (optional)</label>
-                <textarea value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} placeholder="Address" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">{saving ? 'Saving...' : 'Save Customer'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      <CustomerDrawer
+        customerId={drawerCustomerId}
+        onClose={() => setDrawerCustomerId(null)}
+      />
+
+      {showAdd && (
+        <AddCustomerModal
+          onClose={() => setShowAdd(false)}
+          onCreated={() => loadCustomers(1)}
+        />
       )}
     </DashboardLayout>
   );

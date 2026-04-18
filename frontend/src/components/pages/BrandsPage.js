@@ -2,193 +2,206 @@
 
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../DashboardLayout';
-import PageHeader from '../PageHeader';
 import { brandAPI, modelAPI } from '../../services/api';
-import { Tag, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 export default function BrandsPage() {
+  const [tab, setTab] = useState('brands');
   const [brands, setBrands] = useState([]);
   const [models, setModels] = useState([]);
+  const [brandsLoading, setBrandsLoading] = useState(true);
+  const [modelsLoading, setModelsLoading] = useState(true);
 
+  /* Brand form */
   const [brandName, setBrandName] = useState('');
-  const [brandLoading, setBrandLoading] = useState(false);
-  const [brandError, setBrandError] = useState('');
-  const [brandSuccess, setBrandSuccess] = useState('');
+  const [brandSaving, setBrandSaving] = useState(false);
+  const [brandErr, setBrandErr] = useState('');
+  const [brandOk, setBrandOk] = useState('');
 
+  /* Model form */
   const [modelForm, setModelForm] = useState({ brand_id: '', model_name: '', warranty_months: '' });
-  const [modelLoading, setModelLoading] = useState(false);
-  const [modelError, setModelError] = useState('');
-  const [modelSuccess, setModelSuccess] = useState('');
-
-  useEffect(() => {
-    loadBrands();
-    loadModels();
-  }, []);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelErr, setModelErr] = useState('');
+  const [modelOk, setModelOk] = useState('');
 
   const loadBrands = async () => {
+    setBrandsLoading(true);
     try {
       const res = await brandAPI.getAll();
       if (res.data.success) setBrands(res.data.data || []);
     } catch {}
+    finally { setBrandsLoading(false); }
   };
 
   const loadModels = async () => {
+    setModelsLoading(true);
     try {
       const res = await modelAPI.getAll();
       if (res.data.success) setModels(res.data.data || []);
     } catch {}
+    finally { setModelsLoading(false); }
   };
+
+  useEffect(() => { loadBrands(); loadModels(); }, []);
 
   const handleBrandSubmit = async (e) => {
     e.preventDefault();
-    setBrandError('');
-    setBrandSuccess('');
-    setBrandLoading(true);
+    setBrandErr(''); setBrandOk(''); setBrandSaving(true);
     try {
       const res = await brandAPI.create({ name: brandName });
-      if (res.data.success) {
-        setBrandSuccess('Brand created successfully');
-        setBrandName('');
-        loadBrands();
-      } else {
-        setBrandError(res.data.message || 'Failed to create brand');
-      }
-    } catch (err) {
-      setBrandError(err.response?.data?.message || 'Failed to create brand');
-    } finally { setBrandLoading(false); }
+      if (res.data.success) { setBrandOk('Brand added.'); setBrandName(''); loadBrands(); }
+      else setBrandErr(res.data.message || 'Failed to add brand');
+    } catch (err) { setBrandErr(err.response?.data?.message || 'Failed to add brand'); }
+    finally { setBrandSaving(false); }
   };
 
   const handleModelSubmit = async (e) => {
     e.preventDefault();
-    setModelError('');
-    setModelSuccess('');
-    setModelLoading(true);
+    setModelErr(''); setModelOk(''); setModelSaving(true);
     try {
       const res = await modelAPI.create({
         brand_id: parseInt(modelForm.brand_id),
         model_name: modelForm.model_name,
         warranty_months: modelForm.warranty_months ? parseInt(modelForm.warranty_months) : null,
       });
-      if (res.data.success) {
-        setModelSuccess('Model created successfully');
-        setModelForm({ brand_id: '', model_name: '', warranty_months: '' });
-        loadModels();
-      } else {
-        setModelError(res.data.message || 'Failed to create model');
-      }
-    } catch (err) {
-      setModelError(err.response?.data?.message || 'Failed to create model');
-    } finally { setModelLoading(false); }
+      if (res.data.success) { setModelOk('Model added.'); setModelForm({ brand_id: '', model_name: '', warranty_months: '' }); loadModels(); }
+      else setModelErr(res.data.message || 'Failed to add model');
+    } catch (err) { setModelErr(err.response?.data?.message || 'Failed to add model'); }
+    finally { setModelSaving(false); }
   };
 
   const brandsMap = Object.fromEntries(brands.map(b => [b.id, b.name]));
 
   return (
     <DashboardLayout>
-      <PageHeader title="Brands & Models" icon={Tag} />
-      <div className="p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Brands column */}
-          <div className="space-y-5">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-              <h2 className="text-base font-semibold text-slate-800 mb-1">Add Brand</h2>
-              <p className="text-xs text-slate-500 mb-4">Add a new battery brand.</p>
-              {brandError && <div className="mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{brandError}</div>}
-              {brandSuccess && <div className="mb-3 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">{brandSuccess}</div>}
-              <form onSubmit={handleBrandSubmit} className="flex gap-2">
-                <input
-                  value={brandName}
-                  onChange={e => setBrandName(e.target.value)}
-                  required
-                  placeholder="Brand name (e.g. Exide)"
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button type="submit" disabled={brandLoading} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-                  <Plus size={14} />{brandLoading ? 'Adding...' : 'Add'}
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-semibold text-slate-800">All Brands</h3>
-                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{brands.length}</span>
-              </div>
-              {brands.length === 0 ? (
-                <p className="px-6 py-8 text-center text-sm text-slate-400">No brands yet.</p>
-              ) : (
-                <div className="divide-y divide-slate-50">
-                  {brands.map(b => (
-                    <div key={b.id} className="flex items-center justify-between px-6 py-3 hover:bg-slate-50 transition-colors">
-                      <span className="text-sm font-medium text-slate-700">{b.name}</span>
-                      <span className="text-xs text-slate-400 font-mono">#{b.id}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      <div className="page fade-in">
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">Brands & models</h1>
+            <p className="page-sub">Catalogue of brands you stock and the models under each, with warranty periods.</p>
           </div>
+        </div>
 
-          {/* Models column */}
-          <div className="space-y-5">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-              <h2 className="text-base font-semibold text-slate-800 mb-1">Add Model</h2>
-              <p className="text-xs text-slate-500 mb-4">Add a new battery model under a brand.</p>
-              {modelError && <div className="mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{modelError}</div>}
-              {modelSuccess && <div className="mb-3 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">{modelSuccess}</div>}
-              <form onSubmit={handleModelSubmit} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Brand</label>
-                  <select value={modelForm.brand_id} onChange={e => setModelForm(p => ({ ...p, brand_id: e.target.value }))} required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Select brand</option>
-                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Model Name</label>
-                  <input value={modelForm.model_name} onChange={e => setModelForm(p => ({ ...p, model_name: e.target.value }))} required placeholder="e.g. FEW0-TZ0" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Warranty (months, optional)</label>
-                  <input type="number" value={modelForm.warranty_months} onChange={e => setModelForm(p => ({ ...p, warranty_months: e.target.value }))} min="1" placeholder="e.g. 24" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <button type="submit" disabled={modelLoading} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors">
-                  {modelLoading ? 'Adding...' : 'Add Model'}
-                </button>
-              </form>
-            </div>
+        {/* Tab chips */}
+        <div className="chips" style={{ marginBottom: 20 }}>
+          <button className={'chip' + (tab === 'brands' ? ' active' : '')} onClick={() => setTab('brands')}>
+            Brands <span style={{ opacity: 0.55, marginLeft: 4 }}>{brands.length}</span>
+          </button>
+          <button className={'chip' + (tab === 'models' ? ' active' : '')} onClick={() => setTab('models')}>
+            Models <span style={{ opacity: 0.55, marginLeft: 4 }}>{models.length}</span>
+          </button>
+        </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-semibold text-slate-800">All Models</h3>
-                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{models.length}</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 20 }}>
+          {tab === 'brands' ? (
+            <>
+              {/* Add brand form */}
+              <div className="card card-pad">
+                <div className="card-title" style={{ marginBottom: 4 }}>Add a brand</div>
+                <div className="card-sub" style={{ marginBottom: 16 }}>New manufacturer in the catalogue.</div>
+                {brandErr && <div style={{ marginBottom: 12, padding: '9px 12px', background: 'var(--bad-soft)', color: 'var(--bad)', borderRadius: 8, fontSize: 13 }}>{brandErr}</div>}
+                {brandOk  && <div style={{ marginBottom: 12, padding: '9px 12px', background: 'var(--ok-soft)',  color: 'var(--ok)',  borderRadius: 8, fontSize: 13 }}>{brandOk}</div>}
+                <form onSubmit={handleBrandSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="field">
+                    <label>Brand name</label>
+                    <input className="input" value={brandName} onChange={e => setBrandName(e.target.value)} required placeholder="e.g. Tata Green" />
+                  </div>
+                  <button className="btn primary" type="submit" disabled={brandSaving} style={{ justifyContent: 'center' }}>
+                    <Plus size={13} strokeWidth={1.75} />{brandSaving ? 'Adding…' : 'Add brand'}
+                  </button>
+                </form>
               </div>
-              {models.length === 0 ? (
-                <p className="px-6 py-8 text-center text-sm text-slate-400">No models yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+
+              {/* Brands table */}
+              <div className="card">
+                <div className="card-head"><div className="card-title">All brands</div></div>
+                <div className="tbl-wrap">
+                  <table>
                     <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50/60">
-                        {['Brand', 'Model', 'Warranty'].map(h => (
-                          <th key={h} className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
-                        ))}
+                      <tr>
+                        <th>Brand</th>
+                        <th className="num">Models</th>
+                        <th className="num">Units sold</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {models.map(m => (
-                        <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-3 text-sm text-slate-600">{brandsMap[m.brand_id] || '—'}</td>
-                          <td className="px-6 py-3 text-sm font-medium text-slate-800">{m.model_name}</td>
-                          <td className="px-6 py-3 text-sm text-slate-500">{m.warranty_months ? `${m.warranty_months} mo` : '—'}</td>
+                      {brandsLoading ? (
+                        <tr><td colSpan={3} className="empty">Loading…</td></tr>
+                      ) : brands.length === 0 ? (
+                        <tr><td colSpan={3} className="empty">No brands yet.</td></tr>
+                      ) : brands.map(b => {
+                        const mc = models.filter(m => m.brand_id === b.id).length;
+                        return (
+                          <tr key={b.id}>
+                            <td className="strong">{b.name}</td>
+                            <td className="num">{mc}</td>
+                            <td className="num">—</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Add model form */}
+              <div className="card card-pad">
+                <div className="card-title" style={{ marginBottom: 4 }}>Add a model</div>
+                <div className="card-sub" style={{ marginBottom: 16 }}>Link it to a brand and set warranty.</div>
+                {modelErr && <div style={{ marginBottom: 12, padding: '9px 12px', background: 'var(--bad-soft)', color: 'var(--bad)', borderRadius: 8, fontSize: 13 }}>{modelErr}</div>}
+                {modelOk  && <div style={{ marginBottom: 12, padding: '9px 12px', background: 'var(--ok-soft)',  color: 'var(--ok)',  borderRadius: 8, fontSize: 13 }}>{modelOk}</div>}
+                <form onSubmit={handleModelSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="field">
+                    <label>Brand</label>
+                    <select className="ds-select input" value={modelForm.brand_id} onChange={e => setModelForm(p => ({ ...p, brand_id: e.target.value }))} required>
+                      <option value="">Select brand</option>
+                      {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Model name</label>
+                    <input className="input" value={modelForm.model_name} onChange={e => setModelForm(p => ({ ...p, model_name: e.target.value }))} required placeholder="e.g. FEW0-TZ0" />
+                  </div>
+                  <div className="field">
+                    <label>Warranty (months)</label>
+                    <input type="number" className="input" value={modelForm.warranty_months} onChange={e => setModelForm(p => ({ ...p, warranty_months: e.target.value }))} placeholder="24" min="1" />
+                  </div>
+                  <button className="btn primary" type="submit" disabled={modelSaving} style={{ justifyContent: 'center' }}>
+                    <Plus size={13} strokeWidth={1.75} />{modelSaving ? 'Adding…' : 'Add model'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Models table */}
+              <div className="card">
+                <div className="card-head"><div className="card-title">All models</div></div>
+                <div className="tbl-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Model</th><th>Brand</th><th>Warranty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modelsLoading ? (
+                        <tr><td colSpan={3} className="empty">Loading…</td></tr>
+                      ) : models.length === 0 ? (
+                        <tr><td colSpan={3} className="empty">No models yet.</td></tr>
+                      ) : models.map(m => (
+                        <tr key={m.id}>
+                          <td className="strong">{m.model_name}</td>
+                          <td style={{ color: 'var(--muted)' }}>{brandsMap[m.brand_id] || '—'}</td>
+                          <td>{m.warranty_months ? `${m.warranty_months} months` : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </DashboardLayout>
